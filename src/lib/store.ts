@@ -58,6 +58,7 @@ type Page =
   | 'provider-job-proposals'
   | 'provider-notifications'
   | 'worker-notifications'
+  | 'provider-profile'
 
 interface RouterState {
   currentPage: Page

@@ -41,6 +41,7 @@ enum NotificationType {
   WORKER_SELECTED
   JOB_STATUS_CHANGED
   JOB_COMPLETED
+  REVIEW_RECEIVED
 }
 
 model User {
@@ -60,6 +61,8 @@ model User {
   proposals        Proposal[]      @relation("WorkerProposals")
   assignments      JobAssignment[] @relation("WorkerAssignments")
   selectedJobs     Job[]           @relation("SelectedWorker")
+  receivedReviews  Review[]        @relation("ReviewReceiver")
+  givenReviews     Review[]        @relation("ReviewGiver")
   notifications    Notification[]  @relation("UserNotifications")
   activityLogs     ActivityLog[]   @relation("UserActivity")
 }
@@ -83,6 +86,7 @@ model Job {
   selectedWorker  User?        @relation("SelectedWorker", fields: [selectedWorkerId], references: [id])
   proposals       Proposal[]
   assignments     JobAssignment[]
+  reviews         Review[]
 
   @@index([status])
   @@index([createdById])
@@ -147,4 +151,21 @@ model ActivityLog {
   user User @relation("UserActivity", fields: [userId], references: [id])
 
   @@index([userId])
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  jobId      String
+  reviewerId String
+  receiverId String
+  rating     Int
+  comment    String
+  createdAt  DateTime @default(now())
+
+  job      Job  @relation(fields: [jobId], references: [id])
+  reviewer User @relation("ReviewGiver", fields: [reviewerId], references: [id])
+  receiver User @relation("ReviewReceiver", fields: [receiverId], references: [id])
+
+  @@unique([jobId, reviewerId])
+  @@index([receiverId])
 }

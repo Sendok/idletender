@@ -161,4 +161,20 @@ export const usersApi = {
       body: JSON.stringify(data),
       token,
     }),
+
+  getReviews: (id: string) =>
+    apiFetch<{ reviews: any[]; avgRating: number; totalReviews: number }>(`/users/${id}/reviews`),
+}
+
+// Reviews API
+export const reviewsApi = {
+  create: (data: { jobId: string; rating: number; comment: string }, token: string) =>
+    apiFetch<{ review: any }>('/reviews', {
+      method: 'POST',
+      body: JSON.stringify(data),
+      token,
+    }),
+
+  getJobReviews: (jobId: string) =>
+    apiFetch<{ reviews: any[] }>(`/reviews/job/${jobId}`),
 }
