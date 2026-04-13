@@ -25,6 +25,7 @@ export async function GET(
       where: { jobId: id },
       include: {
         worker: { select: { id: true, name: true, avatarUrl: true, bio: true, skills: true, location: true } },
+        attachments: true,
       },
       orderBy: { createdAt: 'desc' },
     })

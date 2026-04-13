@@ -17,6 +17,8 @@ enum JobStatus {
   PROPOSALS_RECEIVED
   WORKER_SELECTED
   IN_PROGRESS
+  REVIEW
+  PAYMENT_PENDING
   COMPLETED
   CANCELLED
 }
@@ -42,6 +44,15 @@ enum NotificationType {
   JOB_STATUS_CHANGED
   JOB_COMPLETED
   REVIEW_RECEIVED
+  NEW_MESSAGE
+  PAYMENT_RECEIVED
+}
+
+enum PaymentStatus {
+  PENDING
+  ESCROWED
+  RELEASED
+  REFUNDED
 }
 
 model User {
@@ -54,17 +65,21 @@ model User {
   bio          String?
   skills       String?
   location     String?
+  company      String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  jobs             Job[]           @relation("JobProvider")
-  proposals        Proposal[]      @relation("WorkerProposals")
-  assignments      JobAssignment[] @relation("WorkerAssignments")
-  selectedJobs     Job[]           @relation("SelectedWorker")
-  receivedReviews  Review[]        @relation("ReviewReceiver")
-  givenReviews     Review[]        @relation("ReviewGiver")
-  notifications    Notification[]  @relation("UserNotifications")
-  activityLogs     ActivityLog[]   @relation("UserActivity")
+  jobs             Job[]              @relation("JobProvider")
+  proposals        Proposal[]         @relation("WorkerProposals")
+  assignments      JobAssignment[]    @relation("WorkerAssignments")
+  selectedJobs     Job[]              @relation("SelectedWorker")
+  receivedReviews  Review[]           @relation("ReviewReceiver")
+  givenReviews     Review[]           @relation("ReviewGiver")
+  notifications    Notification[]     @relation("UserNotifications")
+  activityLogs     ActivityLog[]      @relation("UserActivity")
+  sentMessages     ChatMessage[]      @relation("MessageSender")
+  paymentsMade     Payment[]          @relation("PaymentSender")
+  paymentsReceived Payment[]          @relation("PaymentReceiver")
 }
 
 model Job {
@@ -79,14 +94,17 @@ model Job {
   category          String?
   createdById       String
   selectedWorkerId  String?
+  agreedBudget      Float?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  createdBy       User         @relation("JobProvider", fields: [createdById], references: [id])
-  selectedWorker  User?        @relation("SelectedWorker", fields: [selectedWorkerId], references: [id])
+  createdBy       User            @relation("JobProvider", fields: [createdById], references: [id])
+  selectedWorker  User?           @relation("SelectedWorker", fields: [selectedWorkerId], references: [id])
   proposals       Proposal[]
   assignments     JobAssignment[]
   reviews         Review[]
+  messages        ChatMessage[]
+  payments        Payment[]
 
   @@index([status])
   @@index([createdById])
@@ -103,12 +121,27 @@ model Proposal {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  job     Job  @relation(fields: [jobId], references: [id])
-  worker  User @relation("WorkerProposals", fields: [workerId], references: [id])
+  job         Job                 @relation(fields: [jobId], references: [id])
+  worker      User                @relation("WorkerProposals", fields: [workerId], references: [id])
+  attachments ProposalAttachment[]
 
   @@index([jobId])
   @@index([workerId])
   @@unique([jobId, workerId])
+}
+
+model ProposalAttachment {
+  id         String   @id @default(cuid())
+  proposalId String
+  fileName   String
+  fileSize   Int
+  fileType   String
+  fileUrl    String
+  createdAt  DateTime @default(now())
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
 }
 
 model JobAssignment {
@@ -167,5 +200,38 @@ model Review {
   receiver User @relation("ReviewReceiver", fields: [receiverId], references: [id])
 
   @@unique([jobId, reviewerId])
+  @@index([receiverId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  jobId     String
+  senderId  String
+  message   String
+  createdAt DateTime @default(now())
+
+  job    Job  @relation(fields: [jobId], references: [id])
+  sender User @relation("MessageSender", fields: [senderId], references: [id])
+
+  @@index([jobId])
+  @@index([senderId])
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  jobId     String
+  senderId  String
+  receiverId String
+  amount    Float
+  status    PaymentStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  job      Job  @relation(fields: [jobId], references: [id])
+  sender   User @relation("PaymentSender", fields: [senderId], references: [id])
+  receiver User @relation("PaymentReceiver", fields: [receiverId], references: [id])
+
+  @@index([jobId])
+  @@index([senderId])
   @@index([receiverId])
 }

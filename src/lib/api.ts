@@ -29,6 +29,27 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
   return res.json()
 }
 
+// Upload API (uses FormData, not JSON)
+export const uploadApi = {
+  uploadFile: async (file: File, token: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    })
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: 'Upload failed' }))
+      throw new Error(error.error || `HTTP ${res.status}`)
+    }
+
+    return res.json() as Promise<{ fileUrl: string; fileName: string; fileSize: number; fileType: string }>
+  },
+}
+
 // Auth API
 export const authApi = {
   register: (data: { name: string; email: string; password: string; role: string }) =>
@@ -55,7 +76,7 @@ export const jobsApi = {
   },
 
   get: (id: string, token?: string) =>
-    apiFetch<{ job: any; proposals?: any[] }>(`/jobs/${id}`, token ? { token } : {}),
+    apiFetch<{ job: any; proposals?: any[]; messages?: any[] }>(`/jobs/${id}`, token ? { token } : {}),
 
   create: (data: any, token: string) =>
     apiFetch<{ job: any }>('/jobs', {
@@ -95,6 +116,19 @@ export const jobsApi = {
 
   complete: (jobId: string, token: string) =>
     apiFetch<{ job: any }>(`/jobs/${jobId}/complete`, {
+      method: 'POST',
+      token,
+    }),
+
+  deal: (jobId: string, agreedBudget: number, token: string) =>
+    apiFetch<{ job: any }>(`/jobs/${jobId}/deal`, {
+      method: 'POST',
+      body: JSON.stringify({ agreedBudget }),
+      token,
+    }),
+
+  submitForReview: (jobId: string, token: string) =>
+    apiFetch<{ job: any }>(`/jobs/${jobId}/review-stage`, {
       method: 'POST',
       token,
     }),
@@ -177,4 +211,30 @@ export const reviewsApi = {
 
   getJobReviews: (jobId: string) =>
     apiFetch<{ reviews: any[] }>(`/reviews/job/${jobId}`),
+}
+
+// Chat API
+export const chatApi = {
+  getMessages: (jobId: string, token: string) =>
+    apiFetch<{ messages: any[] }>(`/chat?jobId=${jobId}`, { token }),
+
+  sendMessage: (jobId: string, message: string, token: string) =>
+    apiFetch<{ message: any }>('/chat', {
+      method: 'POST',
+      body: JSON.stringify({ jobId, message }),
+      token,
+    }),
+}
+
+// Payments API
+export const paymentsApi = {
+  list: (token: string, jobId?: string) =>
+    apiFetch<{ payments: any[] }>(`/payments${jobId ? `?jobId=${jobId}` : ''}`, { token }),
+
+  create: (jobId: string, amount: number, token: string) =>
+    apiFetch<{ payment: any }>('/payments', {
+      method: 'POST',
+      body: JSON.stringify({ jobId, amount }),
+      token,
+    }),
 }

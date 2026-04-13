@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useAuthStore, useRouterStore } from '@/lib/store'
-import { authApi, jobsApi, proposalsApi, notificationsApi, dashboardApi, usersApi, reviewsApi } from '@/lib/api'
+import { authApi, jobsApi, proposalsApi, notificationsApi, dashboardApi, usersApi, reviewsApi, uploadApi, chatApi, paymentsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -23,7 +23,8 @@ import {
   LayoutDashboard, User, LogOut, ChevronRight, Eye, ThumbsUp,
   XCircle, AlertCircle, Loader2, Building2, Handshake, Target,
   Zap, Globe, Shield, Menu, X, Send, Calendar, Award,
-  MessageSquare, Ban, RotateCcw, Heart, Quote, ChevronUp, ChevronDown
+  MessageSquare, Ban, RotateCcw, Heart, Quote, ChevronUp, ChevronDown,
+  Paperclip, Download, CreditCard, CircleDot, CheckCircle2, File, Trash2
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
@@ -55,6 +56,8 @@ function getStatusAccent(status: string): string {
     PROPOSALS_RECEIVED: 'border-l-blue-500',
     WORKER_SELECTED: 'border-l-amber-500',
     IN_PROGRESS: 'border-l-purple-500',
+    REVIEW: 'border-l-orange-500',
+    PAYMENT_PENDING: 'border-l-cyan-500',
     COMPLETED: 'border-l-gray-500',
     CANCELLED: 'border-l-red-500',
     SUBMITTED: 'border-l-blue-500',
@@ -272,6 +275,8 @@ function StatusBadge({ status }: { status: string }) {
     PROPOSALS_RECEIVED: { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: FileText },
     WORKER_SELECTED: { color: 'bg-amber-100 text-amber-700 border-amber-200', icon: User },
     IN_PROGRESS: { color: 'bg-purple-100 text-purple-700 border-purple-200', icon: Clock },
+    REVIEW: { color: 'bg-orange-100 text-orange-700 border-orange-200', icon: Eye },
+    PAYMENT_PENDING: { color: 'bg-cyan-100 text-cyan-700 border-cyan-200', icon: CreditCard },
     COMPLETED: { color: 'bg-gray-100 text-gray-700 border-gray-200', icon: CheckCircle },
     CANCELLED: { color: 'bg-red-100 text-red-700 border-red-200', icon: XCircle },
     SUBMITTED: { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Send },
@@ -291,6 +296,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function JobCard({ job, onClick }: { job: any; onClick: () => void }) {
+  const proposalCount = job._count?.proposals || 0
   return (
     <Card className={`hover:shadow-lg transition-all duration-300 cursor-pointer group border hover:border-emerald-200 hover:scale-[1.02] border-l-4 ${getStatusAccent(job.status)}`} onClick={onClick}>
       <CardHeader className="pb-3">
@@ -298,14 +304,20 @@ function JobCard({ job, onClick }: { job: any; onClick: () => void }) {
           <CardTitle className="text-lg group-hover:text-emerald-600 transition line-clamp-1">{job.title}</CardTitle>
           <StatusBadge status={job.status} />
         </div>
-        {job.category && <Badge variant="secondary" className="w-fit text-xs">{job.category}</Badge>}
+        <div className="flex items-center gap-2 mt-1">
+          {job.category && <Badge variant="secondary" className="text-xs">{job.category}</Badge>}
+          {proposalCount > 0 && (
+            <Badge className="bg-blue-50 text-blue-700 border-blue-200 gap-1 text-xs" variant="outline">
+              <Users className="w-3 h-3" /> {proposalCount} {proposalCount === 1 ? 'proposal' : 'proposals'}
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="pb-3">
         <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{job.description}</p>
         <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
           <span className="flex items-center gap-1"><DollarSign className="w-3.5 h-3.5 text-emerald-600" />${job.budgetMin.toLocaleString()} - ${job.budgetMax.toLocaleString()}</span>
           <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{new Date(job.deadline).toLocaleDateString()}</span>
-          <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />{job._count?.proposals || 0} proposals</span>
         </div>
         {job.skills && (
           <div className="flex flex-wrap gap-1 mt-3">
@@ -932,11 +944,19 @@ function JobDetailPage() {
   const { user, isAuthenticated, token } = useAuthStore()
   const [job, setJob] = useState<any>(null)
   const [proposals, setProposals] = useState<any[]>([])
+  const [messages, setMessages] = useState<any[]>([])
   const [reviews, setReviews] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showProposalForm, setShowProposalForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [proposalForm, setProposalForm] = useState({ proposalText: '', expectedBudget: '', estimatedDuration: '' })
+  const [uploadedFiles, setUploadedFiles] = useState<{ fileName: string; fileSize: number; fileType: string; fileUrl: string }[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [chatMessage, setChatMessage] = useState('')
+  const [sendingChat, setSendingChat] = useState(false)
+  const [dealBudget, setDealBudget] = useState('')
+  const [showDealForm, setShowDealForm] = useState(false)
+  const [actionLoading, setActionLoading] = useState(false)
 
   const fetchJob = async () => {
     if (!params.id) return
@@ -944,20 +964,11 @@ function JobDetailPage() {
       const res = await jobsApi.get(params.id, token || undefined)
       setJob(res.job)
       setProposals(res.proposals || [])
+      setMessages(res.messages || [])
     } catch {
       toast.error('Failed to load job')
     }
     setLoading(false)
-  }
-
-  const fetchReviews = async () => {
-    if (!params.id) return
-    try {
-      const res = await reviewsApi.getJobReviews(params.id)
-      setReviews(res.reviews || [])
-    } catch {
-      // Reviews may not exist yet, that's okay
-    }
   }
 
   useEffect(() => {
@@ -967,6 +978,7 @@ function JobDetailPage() {
         const res = await jobsApi.get(params.id, token || undefined)
         setJob(res.job)
         setProposals(res.proposals || [])
+        setMessages(res.messages || [])
       } catch {
         toast.error('Failed to load job')
       }
@@ -981,6 +993,28 @@ function JobDetailPage() {
     load()
   }, [params.id, token])
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !token) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(e.target.files)) {
+        if (file.size > 25 * 1024 * 1024) {
+          toast.error(`${file.name} exceeds 25MB limit`)
+          continue
+        }
+        const result = await uploadApi.uploadFile(file, token)
+        setUploadedFiles(prev => [...prev, { fileName: result.fileName, fileSize: result.fileSize, fileType: result.fileType, fileUrl: result.fileUrl }])
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Upload failed')
+    }
+    setUploading(false)
+  }
+
+  const removeFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   const handleSubmitProposal = async () => {
     if (!token) { navigate('login'); return }
     setSubmitting(true)
@@ -989,10 +1023,12 @@ function JobDetailPage() {
         jobId: params.id,
         ...proposalForm,
         expectedBudget: parseFloat(proposalForm.expectedBudget),
+        attachments: uploadedFiles.length > 0 ? uploadedFiles : undefined,
       }, token)
       toast.success('Proposal submitted successfully!')
       setShowProposalForm(false)
       setProposalForm({ proposalText: '', expectedBudget: '', estimatedDuration: '' })
+      setUploadedFiles([])
       fetchJob()
     } catch (error: any) {
       toast.error(error.message || 'Failed to submit proposal')
@@ -1002,6 +1038,7 @@ function JobDetailPage() {
 
   const handleCancelJob = async () => {
     if (!token) return
+    setActionLoading(true)
     try {
       await jobsApi.update(params.id, { status: 'CANCELLED' }, token)
       toast.success('Job cancelled')
@@ -1009,14 +1046,97 @@ function JobDetailPage() {
     } catch (error: any) {
       toast.error(error.message || 'Failed to cancel job')
     }
+    setActionLoading(false)
+  }
+
+  const handleDeal = async () => {
+    if (!token || !dealBudget) return
+    setActionLoading(true)
+    try {
+      await jobsApi.deal(params.id, parseFloat(dealBudget), token)
+      toast.success('Deal accepted! Job started.')
+      setShowDealForm(false)
+      setDealBudget('')
+      fetchJob()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to accept deal')
+    }
+    setActionLoading(false)
+  }
+
+  const handleSubmitForReview = async () => {
+    if (!token) return
+    setActionLoading(true)
+    try {
+      await jobsApi.submitForReview(params.id, token)
+      toast.success('Work submitted for review!')
+      fetchJob()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to submit for review')
+    }
+    setActionLoading(false)
+  }
+
+  const handleApproveAndPay = async () => {
+    if (!token) return
+    setActionLoading(true)
+    try {
+      await jobsApi.complete(params.id, token)
+      toast.success('Work approved! Payment is being processed.')
+      fetchJob()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to approve')
+    }
+    setActionLoading(false)
+  }
+
+  const handleReleasePayment = async () => {
+    if (!token) return
+    setActionLoading(true)
+    try {
+      await jobsApi.complete(params.id, token)
+      toast.success('Payment released! Job completed.')
+      fetchJob()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to release payment')
+    }
+    setActionLoading(false)
+  }
+
+  const handleSendMessage = async () => {
+    if (!token || !chatMessage.trim()) return
+    setSendingChat(true)
+    try {
+      const res = await chatApi.sendMessage(params.id, chatMessage.trim(), token)
+      setMessages(prev => [...prev, res.message])
+      setChatMessage('')
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send message')
+    }
+    setSendingChat(false)
   }
 
   if (loading) return <div className="max-w-4xl mx-auto px-4 py-8"><Skeleton className="h-96" /></div>
   if (!job) return <div className="max-w-4xl mx-auto px-4 py-8 text-center"><p>Job not found</p></div>
 
   const isOwner = user?.id === job.createdById
+  const isWorker = user?.id === job.selectedWorkerId
   const hasProposed = proposals.some((p: any) => p.workerId === user?.id)
   const hasReviewed = reviews.some((r: any) => r.reviewerId === user?.id)
+  const canChat = isOwner || isWorker
+
+  // Stage tracker
+  const stages = [
+    { key: 'OPEN', label: 'Open', icon: Briefcase },
+    { key: 'PROPOSALS_RECEIVED', label: 'Proposals', icon: FileText },
+    { key: 'WORKER_SELECTED', label: 'Selected', icon: User },
+    { key: 'IN_PROGRESS', label: 'In Progress', icon: Clock },
+    { key: 'REVIEW', label: 'Review', icon: Eye },
+    { key: 'PAYMENT_PENDING', label: 'Payment', icon: CreditCard },
+    { key: 'COMPLETED', label: 'Completed', icon: CheckCircle2 },
+  ]
+  const statusOrder: Record<string, number> = { OPEN: 0, PROPOSALS_RECEIVED: 1, WORKER_SELECTED: 2, IN_PROGRESS: 3, REVIEW: 4, PAYMENT_PENDING: 5, COMPLETED: 6, CANCELLED: -1 }
+  const currentStageIdx = statusOrder[job.status] ?? 0
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -1024,6 +1144,36 @@ function JobDetailPage() {
         <Button variant="ghost" onClick={() => navigate('browse-jobs')} className="mb-4">
           <ChevronRight className="w-4 h-4 mr-1 rotate-180" /> Back to Jobs
         </Button>
+
+        {/* Stage Tracker */}
+        {job.status !== 'CANCELLED' && (
+          <Card className="mb-6">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between overflow-x-auto gap-1">
+                {stages.map((stage, i) => {
+                  const isCompleted = currentStageIdx > i
+                  const isCurrent = currentStageIdx === i
+                  const StageIcon = stage.icon
+                  return (
+                    <div key={stage.key} className="flex items-center gap-1 min-w-0">
+                      <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                        isCompleted ? 'bg-emerald-100 text-emerald-700' :
+                        isCurrent ? 'bg-emerald-600 text-white shadow-md scale-105' :
+                        'bg-gray-100 text-gray-400'
+                      }`}>
+                        {isCompleted ? <CheckCircle2 className="w-3.5 h-3.5" /> : <StageIcon className="w-3.5 h-3.5" />}
+                        <span className="hidden sm:inline">{stage.label}</span>
+                      </div>
+                      {i < stages.length - 1 && (
+                        <div className={`w-4 sm:w-8 h-0.5 ${isCompleted ? 'bg-emerald-400' : 'bg-gray-200'}`} />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className={`border-l-4 ${getStatusAccent(job.status)}`}>
           <CardHeader>
@@ -1034,6 +1184,9 @@ function JobDetailPage() {
                   <StatusBadge status={job.status} />
                   {job.category && <Badge variant="secondary">{job.category}</Badge>}
                   <span className="text-sm text-muted-foreground">{timeAgo(job.createdAt)}</span>
+                  <Badge variant="outline" className="gap-1">
+                    <Users className="w-3 h-3" /> {job._count?.proposals || 0} proposals
+                  </Badge>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1045,11 +1198,11 @@ function JobDetailPage() {
                 {hasProposed && (
                   <Badge className="bg-blue-100 text-blue-700">Proposal Submitted</Badge>
                 )}
-                {job.status === 'COMPLETED' && isAuthenticated && (isOwner || (job.selectedWorker && job.selectedWorker.id === user?.id)) && !hasReviewed && (
-                  <ReviewDialog jobId={job.id} jobTitle={job.title} onSubmitted={fetchReviews} />
+                {job.status === 'COMPLETED' && isAuthenticated && (isOwner || isWorker) && !hasReviewed && (
+                  <ReviewDialog jobId={job.id} jobTitle={job.title} onSubmitted={() => reviewsApi.getJobReviews(job.id).then(r => setReviews(r.reviews || []))} />
                 )}
                 {isOwner && (job.status === 'OPEN' || job.status === 'PROPOSALS_RECEIVED' || job.status === 'WORKER_SELECTED') && (
-                  <Button variant="outline" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleCancelJob}>
+                  <Button variant="outline" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={handleCancelJob} disabled={actionLoading}>
                     <Ban className="w-4 h-4 mr-2" /> Cancel Job
                   </Button>
                 )}
@@ -1080,6 +1233,13 @@ function JobDetailPage() {
                 <p className="text-xl font-bold">{job._count?.proposals || 0}</p>
               </div>
             </div>
+
+            {job.agreedBudget && (
+              <div className="bg-cyan-50 p-3 rounded-lg border border-cyan-200">
+                <p className="text-sm text-cyan-600">Agreed Budget (Deal)</p>
+                <p className="text-2xl font-bold text-cyan-700">${job.agreedBudget?.toLocaleString()}</p>
+              </div>
+            )}
 
             {job.skills && (
               <div>
@@ -1114,8 +1274,191 @@ function JobDetailPage() {
                 </div>
               </>
             )}
+
+            {/* Action Buttons based on status */}
+            {isOwner && job.status === 'WORKER_SELECTED' && !showDealForm && (
+              <>
+                <Separator />
+                <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                  <p className="text-sm text-amber-700 font-medium mb-2">A worker has been selected. Accept a deal to start the project.</p>
+                  <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => { setDealBudget(job.agreedBudget?.toString() || job.budgetMax?.toString() || ''); setShowDealForm(true) }}>
+                    <Handshake className="w-4 h-4 mr-2" /> Accept Deal & Start
+                  </Button>
+                </div>
+              </>
+            )}
+            {isOwner && job.status === 'WORKER_SELECTED' && showDealForm && (
+              <>
+                <Separator />
+                <Card className="border-amber-200 bg-amber-50/50">
+                  <CardContent className="p-4 space-y-3">
+                    <h3 className="font-semibold flex items-center gap-2"><Handshake className="w-4 h-4 text-amber-600" /> Set Deal Budget</h3>
+                    <div>
+                      <Label>Agreed Budget ($)</Label>
+                      <Input type="number" value={dealBudget} onChange={e => setDealBudget(e.target.value)} placeholder="Enter agreed amount" />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={handleDeal} disabled={actionLoading || !dealBudget}>
+                        {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                        Confirm Deal
+                      </Button>
+                      <Button variant="outline" onClick={() => setShowDealForm(false)}>Cancel</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+
+            {isWorker && job.status === 'IN_PROGRESS' && (
+              <>
+                <Separator />
+                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                  <p className="text-sm text-purple-700 font-medium mb-2">Work in progress. Submit your work for review when ready.</p>
+                  <Button className="bg-purple-600 hover:bg-purple-700" onClick={handleSubmitForReview} disabled={actionLoading}>
+                    {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Eye className="w-4 h-4 mr-2" />}
+                    Submit for Review
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {isOwner && job.status === 'REVIEW' && (
+              <>
+                <Separator />
+                <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                  <p className="text-sm text-orange-700 font-medium mb-2">Work has been submitted for your review. Approve to proceed with payment.</p>
+                  <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={handleApproveAndPay} disabled={actionLoading}>
+                    {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CreditCard className="w-4 h-4 mr-2" />}
+                    Approve & Process Payment
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {isOwner && job.status === 'PAYMENT_PENDING' && (
+              <>
+                <Separator />
+                <div className="bg-cyan-50 p-4 rounded-lg border border-cyan-200">
+                  <p className="text-sm text-cyan-700 font-medium mb-2">Payment is being processed. Release payment to complete the job.</p>
+                  {(job.payments || []).filter((p: any) => p.status === 'ESCROWED').map((p: any) => (
+                    <div key={p.id} className="flex items-center gap-2 text-sm mb-2 bg-white p-2 rounded">
+                      <DollarSign className="w-4 h-4 text-cyan-600" />
+                      <span className="font-semibold">${p.amount?.toLocaleString()}</span>
+                      <span className="text-muted-foreground">escrowed → {p.receiver?.name}</span>
+                    </div>
+                  ))}
+                  <Button className="bg-cyan-600 hover:bg-cyan-700" onClick={handleReleasePayment} disabled={actionLoading}>
+                    {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CreditCard className="w-4 h-4 mr-2" />}
+                    Release Payment & Complete
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {isOwner && job.status === 'IN_PROGRESS' && job.selectedWorkerId && (
+              <>
+                <Separator />
+                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                  <p className="text-sm text-purple-700 font-medium mb-2">Job is in progress. Waiting for the worker to submit work for review.</p>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
+
+        {/* Chat Section */}
+        {canChat && job.status !== 'OPEN' && job.status !== 'PROPOSALS_RECEIVED' && job.status !== 'CANCELLED' && (
+          <div className="mt-8">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <MessageSquare className="w-5 h-5 text-emerald-600" /> Chat
+                  <span className="text-sm text-muted-foreground font-normal">
+                    {isOwner ? `with ${job.selectedWorker?.name || 'worker'}` : `with ${job.createdBy?.name || 'provider'}`}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-80 mb-4">
+                  {messages.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      <p className="text-sm">No messages yet. Start the conversation!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 px-1">
+                      {messages.map((msg: any) => {
+                        const isMe = msg.sender?.id === user?.id
+                        return (
+                          <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[75%] rounded-lg px-3 py-2 ${
+                              isMe ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-900'
+                            }`}>
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className={`text-xs font-medium ${isMe ? 'text-emerald-100' : 'text-gray-500'}`}>
+                                  {msg.sender?.name || 'Unknown'}
+                                </span>
+                                <span className={`text-xs ${isMe ? 'text-emerald-200' : 'text-gray-400'}`}>
+                                  {timeAgo(msg.createdAt)}
+                                </span>
+                              </div>
+                              <p className="text-sm">{msg.message}</p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </ScrollArea>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Type a message..."
+                    value={chatMessage}
+                    onChange={e => setChatMessage(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage() } }}
+                    disabled={sendingChat}
+                  />
+                  <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={handleSendMessage} disabled={sendingChat || !chatMessage.trim()}>
+                    {sendingChat ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Payment Info */}
+        {canChat && job.payments && job.payments.length > 0 && (
+          <div className="mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <CreditCard className="w-5 h-5 text-cyan-600" /> Payments
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {job.payments.map((p: any) => (
+                    <div key={p.id} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                      <div>
+                        <p className="font-semibold">${p.amount?.toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">{p.sender?.name} → {p.receiver?.name}</p>
+                      </div>
+                      <Badge className={`${
+                        p.status === 'PENDING' ? 'bg-gray-100 text-gray-700' :
+                        p.status === 'ESCROWED' ? 'bg-amber-100 text-amber-700' :
+                        p.status === 'RELEASED' ? 'bg-emerald-100 text-emerald-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
+                        {p.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Reviews Section for Completed Jobs */}
         {job.status === 'COMPLETED' && reviews.length > 0 && (
@@ -1169,6 +1512,40 @@ function JobDetailPage() {
                     onChange={(e) => setProposalForm(p => ({ ...p, estimatedDuration: e.target.value }))}
                   />
                 </div>
+              </div>
+              {/* File Attachments */}
+              <div>
+                <Label className="mb-2 block">Attachments (max 25MB each)</Label>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()} disabled={uploading}>
+                    {uploading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Paperclip className="w-4 h-4 mr-1" />}
+                    {uploading ? 'Uploading...' : 'Add Files'}
+                  </Button>
+                  <input
+                    id="file-upload"
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.json,.xml,.jpg,.jpeg,.png,.gif,.svg,.webp,.zip,.rar,.7z,.tar,.gz,.md,.rtf,.odt,.ods"
+                  />
+                </div>
+                {uploadedFiles.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {uploadedFiles.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between bg-gray-50 p-2 rounded text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <File className="w-4 h-4 text-gray-500 shrink-0" />
+                          <span className="truncate">{f.fileName}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">({(f.fileSize / 1024).toFixed(1)} KB)</span>
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" className="text-red-500 hover:text-red-700 h-6 w-6 p-0" onClick={() => removeFile(i)}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={handleSubmitProposal} disabled={submitting}>
                 {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
@@ -1247,6 +1624,20 @@ function ProposalCard({ proposal, isOwner, jobId, isWorkerView, onRefresh }: { p
                 {proposal.worker.skills.split(',').map((s: string) => (
                   <Badge key={s} variant="secondary" className="text-xs">{s.trim()}</Badge>
                 ))}
+              </div>
+            )}
+            {proposal.attachments && proposal.attachments.length > 0 && (
+              <div className="mb-3">
+                <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Paperclip className="w-3 h-3" /> Attachments ({proposal.attachments.length})</p>
+                <div className="flex flex-wrap gap-2">
+                  {proposal.attachments.map((att: any) => (
+                    <a key={att.id} href={att.fileUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 bg-gray-50 border rounded-md px-2 py-1 text-xs hover:bg-gray-100 transition">
+                      <File className="w-3 h-3 text-gray-500" />
+                      <span className="max-w-[120px] truncate">{att.fileName}</span>
+                      <Download className="w-3 h-3 text-gray-400" />
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
             <div className="flex flex-wrap gap-2">
@@ -1495,14 +1886,26 @@ function WorkerDashboardPage() {
           {data?.activeJobs?.length > 0 ? (
             <div className="space-y-3">
               {data.activeJobs.map((a: any) => (
-                <Card key={a.id} className={`cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all border-l-4 border-l-purple-500`} onClick={() => navigate('job-detail', { id: a.jobId })}>
+                <Card key={a.id} className={`cursor-pointer hover:shadow-md hover:scale-[1.01] transition-all border-l-4 ${getStatusAccent(a.job?.status || 'IN_PROGRESS')}`} onClick={() => navigate('job-detail', { id: a.jobId })}>
                   <CardContent className="p-4">
                     <div className="flex justify-between items-start">
                       <div>
                         <p className="font-medium">{a.job?.title}</p>
                         <p className="text-sm text-muted-foreground">Assigned {timeAgo(a.assignedAt)}</p>
                       </div>
-                      <StatusBadge status={a.job?.status || 'IN_PROGRESS'} />
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={a.job?.status || 'IN_PROGRESS'} />
+                        {a.job?.status === 'IN_PROGRESS' && (
+                          <Button size="sm" variant="outline" className="text-purple-600 hover:text-purple-700 hover:bg-purple-50" onClick={async (e) => {
+                            e.stopPropagation()
+                            try {
+                              await jobsApi.submitForReview(a.jobId, token!)
+                              toast.success('Submitted for review!')
+                              dashboardApi.worker(token!).then(setData)
+                            } catch (err: any) { toast.error(err.message) }
+                          }}><Eye className="w-3 h-3 mr-1" /> Review</Button>
+                        )}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -1600,6 +2003,15 @@ function WorkerProposalsPage() {
                       <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{p.estimatedDuration}</span>
                       <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{timeAgo(p.createdAt)}</span>
                     </div>
+                    {p.attachments && p.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {p.attachments.map((att: any) => (
+                          <span key={att.id} className="inline-flex items-center gap-1 bg-gray-50 border rounded px-1.5 py-0.5 text-xs text-muted-foreground">
+                            <Paperclip className="w-3 h-3" />{att.fileName}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {p.job?.createdBy && (
@@ -1683,14 +2095,20 @@ function WorkerJobsPage() {
                       <div className="flex items-center gap-2">
                         <StatusBadge status={a.job?.status || 'IN_PROGRESS'} />
                         {a.job?.status === 'IN_PROGRESS' && (
-                          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async (e) => {
+                          <Button size="sm" className="bg-purple-600 hover:bg-purple-700" onClick={async (e) => {
                             e.stopPropagation()
                             try {
-                              await jobsApi.complete(a.jobId, token!)
-                              toast.success('Job marked as completed!')
+                              await jobsApi.submitForReview(a.jobId, token!)
+                              toast.success('Work submitted for review!')
                               dashboardApi.worker(token!).then(setData)
                             } catch (err: any) { toast.error(err.message) }
-                          }}>Mark Complete</Button>
+                          }}><Eye className="w-3 h-3 mr-1" /> Submit for Review</Button>
+                        )}
+                        {a.job?.status === 'REVIEW' && (
+                          <span className="text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded">Under review</span>
+                        )}
+                        {a.job?.status === 'PAYMENT_PENDING' && (
+                          <span className="text-xs text-cyan-600 bg-cyan-50 px-2 py-1 rounded">Payment pending</span>
                         )}
                       </div>
                     </div>
@@ -1893,22 +2311,37 @@ function ProviderDashboardPage() {
                         </Button>
                       )}
                       {job.status === 'WORKER_SELECTED' && (
-                        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async () => {
+                        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async (e) => {
+                          e.stopPropagation()
                           try {
-                            await jobsApi.start(job.id, token!)
-                            toast.success('Job started!')
+                            await jobsApi.deal(job.id, job.agreedBudget || job.budgetMax, token!)
+                            toast.success('Deal accepted, job started!')
                             dashboardApi.provider(token!).then(setData)
                           } catch (err: any) { toast.error(err.message) }
-                        }}>Start Job</Button>
+                        }}><Handshake className="w-3 h-3 mr-1" /> Accept Deal</Button>
                       )}
-                      {job.status === 'IN_PROGRESS' && (
-                        <Button size="sm" variant="outline" className="text-emerald-600" onClick={async () => {
+                      {job.status === 'REVIEW' && (
+                        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async (e) => {
+                          e.stopPropagation()
                           try {
                             await jobsApi.complete(job.id, token!)
-                            toast.success('Job completed!')
+                            toast.success('Approved! Payment processing.')
                             dashboardApi.provider(token!).then(setData)
                           } catch (err: any) { toast.error(err.message) }
-                        }}>Mark Complete</Button>
+                        }}><CreditCard className="w-3 h-3 mr-1" /> Approve & Pay</Button>
+                      )}
+                      {job.status === 'PAYMENT_PENDING' && (
+                        <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={async (e) => {
+                          e.stopPropagation()
+                          try {
+                            await jobsApi.complete(job.id, token!)
+                            toast.success('Payment released!')
+                            dashboardApi.provider(token!).then(setData)
+                          } catch (err: any) { toast.error(err.message) }
+                        }}><CreditCard className="w-3 h-3 mr-1" /> Release</Button>
+                      )}
+                      {job.status === 'IN_PROGRESS' && (
+                        <span className="text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded">Awaiting worker review</span>
                       )}
                       {(job.status === 'OPEN' || job.status === 'PROPOSALS_RECEIVED' || job.status === 'WORKER_SELECTED') && (
                         <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); handleCancelJob(job.id) }}>
@@ -2098,14 +2531,25 @@ function ProviderJobsPage() {
                       </Button>
                     )}
                     {job.status === 'WORKER_SELECTED' && (
-                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async () => {
-                        try { await jobsApi.start(job.id, token!); toast.success('Job started!'); dashboardApi.provider(token!).then(setData) } catch (e: any) { toast.error(e.message) }
-                      }}>Start</Button>
+                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async (e) => {
+                        e.stopPropagation()
+                        try { await jobsApi.deal(job.id, job.agreedBudget || job.budgetMax, token!); toast.success('Deal accepted!'); dashboardApi.provider(token!).then(setData) } catch (e: any) { toast.error(e.message) }
+                      }}><Handshake className="w-3 h-3 mr-1" /> Deal</Button>
+                    )}
+                    {job.status === 'REVIEW' && (
+                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={async (e) => {
+                        e.stopPropagation()
+                        try { await jobsApi.complete(job.id, token!); toast.success('Approved!'); dashboardApi.provider(token!).then(setData) } catch (e: any) { toast.error(e.message) }
+                      }}><CreditCard className="w-3 h-3 mr-1" /> Approve</Button>
+                    )}
+                    {job.status === 'PAYMENT_PENDING' && (
+                      <Button size="sm" className="bg-cyan-600 hover:bg-cyan-700" onClick={async (e) => {
+                        e.stopPropagation()
+                        try { await jobsApi.complete(job.id, token!); toast.success('Payment released!'); dashboardApi.provider(token!).then(setData) } catch (e: any) { toast.error(e.message) }
+                      }}><CreditCard className="w-3 h-3 mr-1" /> Release</Button>
                     )}
                     {job.status === 'IN_PROGRESS' && (
-                      <Button size="sm" variant="outline" className="text-emerald-600" onClick={async () => {
-                        try { await jobsApi.complete(job.id, token!); toast.success('Job completed!'); dashboardApi.provider(token!).then(setData) } catch (e: any) { toast.error(e.message) }
-                      }}>Complete</Button>
+                      <span className="text-xs text-purple-600 bg-purple-50 px-2 py-1 rounded">In progress</span>
                     )}
                     {(job.status === 'OPEN' || job.status === 'PROPOSALS_RECEIVED' || job.status === 'WORKER_SELECTED') && (
                       <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); handleCancelJob(job.id) }}>

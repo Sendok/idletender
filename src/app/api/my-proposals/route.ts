@@ -5,9 +5,7 @@ import { getUserFromRequest } from '@/lib/auth'
 export async function GET(request: Request) {
   try {
     const user = await getUserFromRequest(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     if (user.role !== 'WORKER') {
       return NextResponse.json({ error: 'Only workers can view their proposals' }, { status: 403 })
     }
@@ -30,9 +28,11 @@ export async function GET(request: Request) {
             deadline: true,
             status: true,
             category: true,
+            agreedBudget: true,
             createdBy: { select: { id: true, name: true, avatarUrl: true } },
           },
         },
+        attachments: true,
       },
       orderBy: { createdAt: 'desc' },
     })

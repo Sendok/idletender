@@ -14,34 +14,52 @@ export async function GET(
       where: { id },
       include: {
         createdBy: { select: { id: true, name: true, avatarUrl: true, location: true, bio: true } },
-        selectedWorker: { select: { id: true, name: true, avatarUrl: true } },
-        _count: { select: { proposals: true } },
+        selectedWorker: { select: { id: true, name: true, avatarUrl: true, location: true, bio: true } },
+        _count: { select: { proposals: true, messages: true } },
+        payments: {
+          include: {
+            sender: { select: { id: true, name: true } },
+            receiver: { select: { id: true, name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
       },
     })
 
-    if (!job) {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-    }
+    if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
 
-    let proposals = []
+    let proposals: any[] = []
     if (user && (user.id === job.createdById || user.role === 'WORKER')) {
       if (user.id === job.createdById) {
         proposals = await db.proposal.findMany({
           where: { jobId: id },
           include: {
             worker: { select: { id: true, name: true, avatarUrl: true, bio: true, skills: true, location: true } },
+            attachments: true,
           },
           orderBy: { createdAt: 'desc' },
         })
       } else {
         const myProposal = await db.proposal.findUnique({
           where: { jobId_workerId: { jobId: id, workerId: user.id } },
+          include: { attachments: true },
         })
         if (myProposal) proposals = [myProposal]
       }
     }
 
-    return NextResponse.json({ job, proposals })
+    // Get recent chat messages if user is involved
+    let messages: any[] = []
+    if (user && (job.createdById === user.id || job.selectedWorkerId === user.id)) {
+      messages = await db.chatMessage.findMany({
+        where: { jobId: id },
+        include: { sender: { select: { id: true, name: true, avatarUrl: true, role: true } } },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+      })
+    }
+
+    return NextResponse.json({ job, proposals, messages })
   } catch (error) {
     console.error('Get job error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -55,14 +73,10 @@ export async function PUT(
   try {
     const { id } = await params
     const user = await getUserFromRequest(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const job = await db.job.findUnique({ where: { id } })
-    if (!job) {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-    }
+    if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     if (job.createdById !== user.id) {
       return NextResponse.json({ error: 'Only the job creator can update this job' }, { status: 403 })
     }
@@ -90,14 +104,17 @@ export async function PUT(
     })
 
     if (status && status !== job.status) {
-      await db.notification.create({
-        data: {
-          userId: job.selectedWorkerId || job.createdById,
-          type: 'JOB_STATUS_CHANGED',
-          message: `Job "${job.title}" status changed to ${status}`,
-          entityId: job.id,
-        },
-      })
+      const notifyUserId = job.selectedWorkerId || job.createdById
+      if (notifyUserId) {
+        await db.notification.create({
+          data: {
+            userId: notifyUserId,
+            type: 'JOB_STATUS_CHANGED',
+            message: `Job "${job.title}" status changed to ${status.replace(/_/g, ' ')}`,
+            entityId: job.id,
+          },
+        })
+      }
       await db.activityLog.create({
         data: {
           userId: user.id,
@@ -122,14 +139,10 @@ export async function DELETE(
   try {
     const { id } = await params
     const user = await getUserFromRequest(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const job = await db.job.findUnique({ where: { id } })
-    if (!job) {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-    }
+    if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
     if (job.createdById !== user.id) {
       return NextResponse.json({ error: 'Only the job creator can delete this job' }, { status: 403 })
     }

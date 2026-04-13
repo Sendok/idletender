@@ -59,6 +59,7 @@ type Page =
   | 'provider-notifications'
   | 'worker-notifications'
   | 'provider-profile'
+  | 'chat'
 
 interface RouterState {
   currentPage: Page
