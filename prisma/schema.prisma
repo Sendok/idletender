@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  WORKER
+  JOB_PROVIDER
+}
+
+enum JobStatus {
+  OPEN
+  PROPOSALS_RECEIVED
+  WORKER_SELECTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ProposalStatus {
+  SUBMITTED
+  SHORTLISTED
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  PROPOSAL_RECEIVED
+  PROPOSAL_STATUS_CHANGED
+  WORKER_SELECTED
+  JOB_STATUS_CHANGED
+  JOB_COMPLETED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  avatarUrl    String?
+  bio          String?
+  skills       String?
+  location     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  jobs             Job[]           @relation("JobProvider")
+  proposals        Proposal[]      @relation("WorkerProposals")
+  assignments      JobAssignment[] @relation("WorkerAssignments")
+  selectedJobs     Job[]           @relation("SelectedWorker")
+  notifications    Notification[]  @relation("UserNotifications")
+  activityLogs     ActivityLog[]   @relation("UserActivity")
+}
+
+model Job {
+  id                String     @id @default(cuid())
+  title             String
+  description       String
+  budgetMin         Float
+  budgetMax         Float
+  deadline          DateTime
+  status            JobStatus  @default(OPEN)
+  skills            String?
+  category          String?
+  createdById       String
+  selectedWorkerId  String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  createdBy       User         @relation("JobProvider", fields: [createdById], references: [id])
+  selectedWorker  User?        @relation("SelectedWorker", fields: [selectedWorkerId], references: [id])
+  proposals       Proposal[]
+  assignments     JobAssignment[]
+
+  @@index([status])
+  @@index([createdById])
+}
+
+model Proposal {
+  id                String          @id @default(cuid())
+  jobId             String
+  workerId          String
+  proposalText      String
+  expectedBudget    Float
+  estimatedDuration String
+  status            ProposalStatus  @default(SUBMITTED)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  job     Job  @relation(fields: [jobId], references: [id])
+  worker  User @relation("WorkerProposals", fields: [workerId], references: [id])
+
+  @@index([jobId])
+  @@index([workerId])
+  @@unique([jobId, workerId])
+}
+
+model JobAssignment {
+  id          String           @id @default(cuid())
+  jobId       String
+  workerId    String
+  assignedAt  DateTime         @default(now())
+  status      AssignmentStatus @default(ACTIVE)
+  completedAt DateTime?
+
+  job     Job  @relation(fields: [jobId], references: [id])
+  worker  User @relation("WorkerAssignments", fields: [workerId], references: [id])
+
+  @@index([jobId])
+  @@index([workerId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  message   String
+  isRead    Boolean          @default(false)
+  entityId  String?
+  createdAt DateTime         @default(now())
+
+  user User @relation("UserNotifications", fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  entityType String?
+  entityId   String?
+  createdAt  DateTime @default(now())
+
+  user User @relation("UserActivity", fields: [userId], references: [id])
+
+  @@index([userId])
+}
